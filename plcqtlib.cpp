@@ -38,11 +38,16 @@
 #include<QTcpSocket>
 #include<nodave.h>
 
-PlcQtLib::PlcQtLib(QString _ip,int _dbNr, int _dbSize,unsigned char*_buf):QThread(){
+PlcQtLib::PlcQtLib(QString _ip, int _dbNr, int _dbSize, unsigned char *_buf, int _Slot, int _Rack, int _sleepTime){
    ip=_ip;
    dbNr=_dbNr;
    dbSize=_dbSize;
    dbBlock=_buf;
+   sleepTime=_sleepTime;
+   Slot=_Slot;
+   Rack=_Rack;
+   sleepTime=_sleepTime;
+   plcConnect=false;
 }
 
 PlcQtLib::~PlcQtLib()
@@ -87,33 +92,37 @@ void PlcQtLib::stopThread()
 }
 
 //funkcje wątku
-void PlcQtLib::_writeByte(int dbb, int data){
+bool PlcQtLib::_writeByte(int dbb, int data){
    PlcBYTE _data=data;
-   daveWriteBytes(dc,daveDB,dbNr,dbb,1,&_data);
+   int res=daveWriteBytes(dc,daveDB,dbNr,dbb,1,&_data);
+   return !res;
 
 }
 
-void PlcQtLib::_writeWord(int dbw, int data)
+bool PlcQtLib::_writeWord(int dbw, int data)
 {
     PlcWORD _data=daveSwapIed_16(data);
-    daveWriteBytes(dc,daveDB,dbNr,dbw,2,&_data);
+    int res= daveWriteBytes(dc,daveDB,dbNr,dbw,2,&_data);
+    return !res;
+
 }
 
-void PlcQtLib::_writeDword(int dbd, int data)
+bool PlcQtLib::_writeDword(int dbd, int data)
 {
     PlcDWORD _data=daveSwapIed_32(data);
-    daveWriteBytes(dc,daveDB,dbNr,dbd,4,&_data);
+    int res=daveWriteBytes(dc,daveDB,dbNr,dbd,4,&_data);
+    return !res;
 
 }
 
-void PlcQtLib::_setBit(int dbx, int bitNr)
+bool PlcQtLib::_setBit(int dbx, int bitNr)
 {
-    daveSetBit(dc,daveDB,dbNr,dbx,bitNr);
+    return !daveSetBit(dc,daveDB,dbNr,dbx,bitNr);
 }
 
-void PlcQtLib::_clearBit(int dbx, int bitNr)
+bool PlcQtLib::_clearBit(int dbx, int bitNr)
 {
-    daveClrBit(dc,daveDB,dbNr,dbx,bitNr);
+    return !daveClrBit(dc,daveDB,dbNr,dbx,bitNr);
 }
 //funkcja run
 void PlcQtLib::run()
@@ -129,33 +138,42 @@ void PlcQtLib::run()
     daveInterface *di;
     fds.wfd =(HANDLE)socket.socketDescriptor();
     fds.rfd=fds.wfd;
-    bool okPlc=false;
+    plcConnect=false;
     if (fds.rfd>0){
         di = daveNewInterface(fds, "IF1",0, 122, daveSpeed187k);
         daveSetTimeout(di,5000000);
-        dc=daveNewConnection(di,2,0,2);
+        dc=daveNewConnection(di,2,Rack,Slot);
         if(daveConnectPLC(dc)==0)
-            okPlc=true;
+            plcConnect=true;
         else
-            okPlc=false;
+            plcConnect=false;
     }
-    if (okPlc) emit connected(true);
-    while(okPlc&&(!_stopThread)){
+    if(!plcConnect){
+        socket.disconnectFromHost();
+        daveDisconnectPLC(dc);
+        daveFree(dc);
+        emit connected(false);
+        return;
+    }
+    emit connected(true);
+    while(!_stopThread){
         while (!kolejkaZadan.empty()) {
             QMutexLocker m(&mutex);
-            kolejkaZadan.dequeue()();
+            plcConnect=kolejkaZadan.dequeue()();
+            if(!plcConnect) break;
         }
-        int error=daveReadBytes(dc,daveDB,dbNr,0,dbSize,dbBlock);
-        okPlc=!error;
-        if(okPlc)emit dataReady();
-        QThread::msleep(500);
+        if(!plcConnect) break;
+        plcConnect=!daveReadBytes(dc,daveDB,dbNr,0,dbSize,dbBlock);
+        if(!plcConnect) break;
+        emit dataReady();
+        if(sleepTime) QThread::msleep(sleepTime);
     }
     socket.disconnectFromHost();
-//    socket.waitForDisconnected();
     daveDisconnectPLC(dc);
     daveFree(dc);
     emit connected(false);
 }
+
 
 int PlcBYTEtoInt(PlcBYTE data)
 {

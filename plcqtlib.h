@@ -57,16 +57,24 @@ class PlcQtLib:public QThread{
     Q_OBJECT
 
     QString ip; int dbNr; int dbSize;
+    int Rack,Slot,sleepTime;
     unsigned char* dbBlock;
 
     _daveConnection *dc;
     QMutex mutex;
     void run();
-    QQueue<std::function<void()>> kolejkaZadan;
+    QQueue<std::function<bool()>> kolejkaZadan;
     bool _stopThread=false;
+    bool plcConnect=false;
 public:
-    PlcQtLib(QString _ip,int _dbNr, int _dbSize,unsigned char*_buf=nullptr);
+    //s7-300    _Rack=0 _Slot =2
+    //s7-1500   _Rack=0 _Slot =1
+    PlcQtLib( QString _ip,int _dbNr, int _dbSize,unsigned char*_buf=nullptr, int _Slot=2,int _Rak=0, int _sleepTime=500);
+
     ~PlcQtLib();
+    bool plcStatus(){
+        return plcConnect;
+    }
     void registerDb(unsigned char* buff){
         dbBlock=buff;
     }
@@ -82,11 +90,11 @@ public slots:
 
     //thread function
 private:
-    void _writeByte(int dbb,int data);
-    void _writeWord(int dbw,int data);
-    void _writeDword(int dbd,int data);
-    void _setBit(int dbx,int bitNr);
-    void _clearBit(int dbx,int bitNr);
+    bool _writeByte(int dbb,int data);
+    bool _writeWord(int dbw,int data);
+    bool _writeDword(int dbd,int data);
+    bool _setBit(int dbx,int bitNr);
+    bool _clearBit(int dbx,int bitNr);
 signals:
     void connected(bool stat);
     void dataReady();
